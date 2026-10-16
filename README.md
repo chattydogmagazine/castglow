@@ -27,6 +27,7 @@ HyperX's own software (NGENUITY) only runs on Windows. CastGlow gives Mac owners
 - 🎙️ **Audio.** Mic level, mic mute, headphone level, headphone mute, and monitoring (hear your own voice in the headphones) with its level.
 - 🔄 **Always in step.** The window refreshes every second, so it shows changes made in macOS Sound settings or other apps too.
 - 🔇 **Knows when you tap mute.** Optional: CastGlow can spot when you mute using the touch button on top of the mic, tick Mute and show a crossed-out mic in the menu bar.
+- 🟢 **See at a glance if you're live.** The menu bar mic shows your mic's **top** lighting colour when it's live and its **bottom** colour (with a line through it) when it's muted. Switch this off to use the normal menu bar colour.
 - 🔝 **Menu bar.** A mic icon in the menu bar opens the settings, mutes the mic, or switches lights off or to rainbow in one click.
 - 🪶 **Tiny.** The download is under 1 MB, there's no account or sign-in, and it collects no data. It needs no internet connection at all.
 
@@ -60,12 +61,16 @@ Want CastGlow ready every time you turn on your Mac? Click the mic icon in the m
 | Hear yourself in headphones | Tick **On** next to **Hear yourself** and adjust its slider |
 | Keep the window up to date | Leave **Keep in sync** ticked under **Options** (on by default) |
 | See when you've muted using the button on the mic | Tick **Detect the mute button on top of the mic** under **Options**, and click **Allow** if macOS asks about the microphone |
+| Colour the menu bar icon | Leave **Menu bar icon in mic colours** ticked under **Options**: the icon shows your **top** colour when the mic is live and your **bottom** colour when it's muted. Untick it for the normal menu bar colour |
 | Quit completely | Menu bar icon → **Quit CastGlow** (closing the window keeps it in the menu bar) |
 
 ## Questions & fixes
 
 **I can't see the mic icon in the menu bar.**
 Your menu bar may be full. macOS hides icons that don't fit, especially on smaller screens or MacBooks with a notch. On macOS Tahoe (26), open **System Settings → Menu Bar** and make sure **CastGlow** is allowed. Removing a few other menu bar icons also frees up space. You can always open CastGlow from Launchpad instead.
+
+**Why did macOS ask about the microphone again after an update?**
+macOS remembers microphone permission for each exact copy of an app. Free apps like CastGlow that aren't sold through the App Store get a new identity with each version, so macOS asks once more. Click **Allow**. It only matters if you use **Detect the mute button on top of the mic**.
 
 **It says "lighting controller not found".**
 Check the QuadCast S is plugged in with its USB cable and that its lights are on. Try another USB port or cable, then reopen CastGlow.

@@ -62,7 +62,7 @@ fn nsstr(s: &str) -> Id {
 
 // ---- controls -------------------------------------------------------------
 
-const H: f64 = 600.0;
+const H: f64 = 632.0;
 const W: f64 = 480.0;
 
 fn r(x: f64, top: f64, w: f64, h: f64) -> Rect {
@@ -78,6 +78,7 @@ const T_MON: isize = 30;
 const T_MON_LEVEL: isize = 31;
 const T_SYNC: isize = 40;
 const T_DETECT: isize = 41;
+const T_TINT: isize = 42;
 
 struct Ui {
     effect: usize,
@@ -97,6 +98,7 @@ struct Ui {
     login_item: usize,
     sync_box: usize,
     detect_box: usize,
+    tint_box: usize,
     bar_button: usize,
 }
 
@@ -199,6 +201,34 @@ fn checked(v: usize) -> bool {
 
 const PREF_SYNC: &str = "keepInSync";
 const PREF_DETECT: &str = "detectMicMuteButton";
+const PREF_TINT: &str = "colourMenuBarIcon";
+const PREF_TOP: &str = "topColour";
+const PREF_BOTTOM: &str = "bottomColour";
+
+fn pref_str(key: &str) -> Option<String> {
+    let v = msg![Id; defaults(), "stringForKey:", nsstr(key) => Id];
+    if v == NIL {
+        return None;
+    }
+    let p = msg![*const c_char; v, "UTF8String"];
+    if p.is_null() {
+        return None;
+    }
+    Some(unsafe { std::ffi::CStr::from_ptr(p) }.to_string_lossy().into_owned())
+}
+
+fn set_pref_str(key: &str, v: &str) {
+    msg![(); defaults(), "setObject:forKey:", nsstr(v) => Id, nsstr(key) => Id];
+}
+
+fn hex_of(c: Rgb) -> String {
+    format!("{:02x}{:02x}{:02x}", c.0, c.1, c.2)
+}
+
+fn nscolor(c: Rgb) -> Id {
+    msg![Id; cls("NSColor"), "colorWithSRGBRed:green:blue:alpha:",
+        c.0 as f64 / 255.0 => f64, c.1 as f64 / 255.0 => f64, c.2 as f64 / 255.0 => f64, 1.0 => f64]
+}
 
 fn defaults() -> Id {
     msg![Id; cls("NSUserDefaults"), "standardUserDefaults"]
@@ -241,25 +271,86 @@ fn start_detection() -> Result<String, String> {
     r.map(|_| "Watching for the mic's own mute button. Tap the top of the mic to try it.".to_string())
 }
 
+/// Messages from background work, shown by the next tick on the main thread.
+static PENDING_STATUS: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static DETECT_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Starts mute detection on a background thread. Opening the microphone
+/// can wait for the user to answer macOS's permission question, and the
+/// window must not freeze while that happens.
+fn start_detection_in_background() {
+    std::thread::spawn(|| {
+        let msg = match start_detection() {
+            Ok(m) => m,
+            Err(e) => {
+                DETECT_FAILED.store(true, std::sync::atomic::Ordering::Relaxed);
+                format!("Problem: {}", e)
+            }
+        };
+        if let Ok(mut p) = PENDING_STATUS.lock() {
+            *p = Some(msg);
+        }
+    });
+}
+
 static LAST_MUTED: std::sync::atomic::AtomicI8 = std::sync::atomic::AtomicI8::new(-1);
 static LAST_HW: std::sync::atomic::AtomicI8 = std::sync::atomic::AtomicI8::new(-1);
 
-fn set_bar_icon(muted: bool) {
+/// Menu bar icon. `state`: Some(false) = live, Some(true) = muted,
+/// None = unknown (mic not found). With "Colour the menu bar icon" on,
+/// live uses the mic's top colour and muted its bottom colour; otherwise,
+/// or when the state is unknown, the normal system colour is used.
+fn set_bar_icon(state: Option<bool>) {
     let Some(ui) = UI.get() else { return };
     if ui.bar_button == 0 {
         return;
     }
+    let muted = state == Some(true);
     let name = if muted { "mic.slash.fill" } else { "mic.fill" };
     let img = msg![Id; cls("NSImage"), "imageWithSystemSymbolName:accessibilityDescription:", nsstr(name) => Id, nsstr("CastGlow") => Id];
     if img != NIL {
         msg![(); img, "setTemplate:", 1i8 => i8];
         msg![(); ui.bar_button as Id, "setImage:", img => Id];
     }
+    let tint = match state {
+        Some(m) if checked(ui.tint_box) => {
+            let c = well_colour(if m { ui.bottom } else { ui.top } as Id);
+            // A colour too dark to see in the menu bar falls back to the system colour.
+            if c.0 as u32 + c.1 as u32 + c.2 as u32 > 90 { nscolor(c) } else { NIL }
+        }
+        _ => NIL,
+    };
+    msg![(); ui.bar_button as Id, "setContentTintColor:", tint => Id];
+    if std::path::Path::new("/tmp/castglow-debug").exists() {
+        use std::io::Write;
+        let applied = msg![Id; ui.bar_button as Id, "contentTintColor"];
+        let desc = if applied == NIL { "system default".to_string() } else {
+            let d = msg![Id; applied, "description"];
+            let p = msg![*const c_char; d, "UTF8String"];
+            unsafe { std::ffi::CStr::from_ptr(p) }.to_string_lossy().into_owned()
+        };
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/castglow-icon.log") {
+            let _ = writeln!(f, "state={:?} icon={} tint={}", state, name, desc);
+        }
+    }
+    let tip = match state {
+        Some(true) => "CastGlow: mic muted",
+        Some(false) => "CastGlow: mic live",
+        None => "CastGlow: mic not found",
+    };
+    msg![(); ui.bar_button as Id, "setToolTip:", nsstr(tip) => Id];
 }
 
 /// Runs every second: brings the window and menu bar icon up to date.
 extern "C" fn on_tick(_this: Id, _cmd: Sel, _timer: Id) {
     let Some(ui) = UI.get() else { return };
+    if let Some(m) = PENDING_STATUS.lock().ok().and_then(|mut p| p.take()) {
+        set_status(&m);
+    }
+    if DETECT_FAILED.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        msg![(); ui.detect_box as Id, "setState:", 0isize => isize];
+        set_pref(PREF_DETECT, false);
+    }
     let sync = checked(ui.sync_box);
     let hw = if checked(ui.detect_box) { listen::muted_on_mic() } else { None };
     if std::env::var_os("CASTGLOW_DEBUG").is_some() || std::path::Path::new("/tmp/castglow-debug").exists() {
@@ -297,9 +388,9 @@ extern "C" fn on_tick(_this: Id, _cmd: Sel, _timer: Id) {
     if sync || hw.is_some() {
         msg![(); ui.mic_mute as Id, "setState:", muted as isize => isize];
     }
-    if LAST_MUTED.swap(muted as i8, std::sync::atomic::Ordering::Relaxed) != muted as i8 {
-        set_bar_icon(muted);
-    }
+    let _ = LAST_MUTED.swap(muted as i8, std::sync::atomic::Ordering::Relaxed);
+    let known = audio.is_some() || hw.is_some() || AudioDevice::find().is_ok();
+    set_bar_icon(if known { Some(muted) } else { None });
     if let Some(h) = hw {
         let prev = LAST_HW.swap(h as i8, std::sync::atomic::Ordering::Relaxed);
         if prev != -1 && prev != h as i8 {
@@ -324,6 +415,8 @@ fn apply_lighting(ui: &Ui) -> Result<String, String> {
     };
     let light = Light::open()?;
     light.send_all(&protocol::save_reports(&fr)?)?;
+    set_pref_str(PREF_TOP, &hex_of(top));
+    set_pref_str(PREF_BOTTOM, &hex_of(bottom));
     Ok(format!("Lighting set: {} - saved on the mic.", EFFECTS[i.min(EFFECTS.len() - 1)]))
 }
 
@@ -335,16 +428,16 @@ fn handle(tag: isize) {
             set_pref(PREF_SYNC, checked(ui.sync_box));
             Ok((if checked(ui.sync_box) { "Keeping in sync with the mic and macOS." } else { "Sync off: the window shows only changes made here." }).to_string())
         }
+        T_TINT => {
+            set_pref(PREF_TINT, checked(ui.tint_box));
+            Ok((if checked(ui.tint_box) { "Menu bar icon: top colour when live, bottom colour when muted." } else { "Menu bar icon uses the normal system colour." }).to_string())
+        }
         T_DETECT => {
             let on = checked(ui.detect_box);
             set_pref(PREF_DETECT, on);
             if on {
-                let r = start_detection();
-                if r.is_err() {
-                    msg![(); ui.detect_box as Id, "setState:", 0isize => isize];
-                    set_pref(PREF_DETECT, false);
-                }
-                r
+                start_detection_in_background();
+                Ok("Starting… if macOS asks to use the microphone, click Allow.".to_string())
             } else {
                 listen::stop();
                 Ok("Stopped watching for the mic's mute button.".to_string())
@@ -587,9 +680,9 @@ pub fn run() {
     label(v, "Effect", r(20.0, 52.0, 110.0, 20.0), false);
     let effect = popup(v, &EFFECTS, r(140.0, 48.0, 310.0, 26.0), 0);
     label(v, "Top colour", r(20.0, 92.0, 110.0, 20.0), false);
-    let top = colour_well(v, r(140.0, 86.0, 70.0, 30.0), Rgb(255, 0, 0));
+    let top = colour_well(v, r(140.0, 86.0, 70.0, 30.0), pref_str(PREF_TOP).and_then(|h| Rgb::parse(&h)).unwrap_or(Rgb(255, 0, 0)));
     label(v, "Bottom colour", r(240.0, 92.0, 110.0, 20.0), false);
-    let bottom = colour_well(v, r(350.0, 86.0, 70.0, 30.0), Rgb(0, 0, 255));
+    let bottom = colour_well(v, r(350.0, 86.0, 70.0, 30.0), pref_str(PREF_BOTTOM).and_then(|h| Rgb::parse(&h)).unwrap_or(Rgb(0, 0, 255)));
     label(v, "Speed", r(20.0, 134.0, 110.0, 20.0), false);
     let speed = popup(v, &["Slow", "Normal", "Fast"], r(140.0, 130.0, 310.0, 26.0), 1);
     label(v, "Brightness", r(20.0, 174.0, 110.0, 20.0), false);
@@ -616,10 +709,12 @@ pub fn run() {
     let sync_box = checkbox(v, "Keep in sync with the mic and macOS (updates every second)", r(20.0, 455.0, 450.0, 22.0), ctrl, T_SYNC);
     let detect_box = checkbox(v, "Detect the mute button on top of the mic", r(20.0, 483.0, 450.0, 22.0), ctrl, T_DETECT);
     label(v, "Listens for the silence the mic sends when muted. macOS shows its orange microphone dot while this is on. Nothing is recorded.", r(40.0, 506.0, 420.0, 32.0), false);
+    let tint_box = checkbox(v, "Menu bar icon in mic colours: top = live, bottom = muted", r(20.0, 546.0, 450.0, 22.0), ctrl, T_TINT);
+    msg![(); tint_box, "setState:", pref(PREF_TINT, true) as isize => isize];
     msg![(); sync_box, "setState:", pref(PREF_SYNC, true) as isize => isize];
     msg![(); detect_box, "setState:", pref(PREF_DETECT, false) as isize => isize];
 
-    let status = label(v, "", r(20.0, 548.0, 440.0, 44.0), false);
+    let status = label(v, "", r(20.0, 580.0, 440.0, 44.0), false);
 
     let ui = Ui {
         effect: effect as usize,
@@ -639,6 +734,7 @@ pub fn run() {
         login_item: 0,
         sync_box: sync_box as usize,
         detect_box: detect_box as usize,
+        tint_box: tint_box as usize,
         bar_button: 0,
     };
     let (mute_item, login_item, bar_button) = build_status_item(ctrl);
@@ -680,9 +776,7 @@ pub fn run() {
     let _ = UI.set(ui);
     set_status(&notes.join("  "));
     if pref(PREF_DETECT, false) {
-        if let Err(e) = start_detection() {
-            set_status(&format!("Problem: {}", e));
-        }
+        start_detection_in_background();
     }
     let timer = msg![Id; cls("NSTimer"), "scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:",
         1.0 => f64, ctrl => Id, sel("onTick:") => Sel, NIL => Id, 1i8 => i8];
