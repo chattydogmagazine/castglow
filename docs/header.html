@@ -1,0 +1,33 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  html,body{margin:0;width:1280px;height:640px;overflow:hidden;background:#0d0d12;font-family:-apple-system,"SF Pro Display","Helvetica Neue",sans-serif;}
+  .bg{position:absolute;inset:0;
+    background:
+      radial-gradient(520px 420px at 82% 28%, rgba(255,45,85,.55), transparent 70%),
+      radial-gradient(560px 460px at 78% 82%, rgba(40,110,255,.55), transparent 70%),
+      radial-gradient(900px 600px at 10% 100%, rgba(120,60,255,.18), transparent 70%),
+      #0d0d12;}
+  .grain{position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.05) 1px, transparent 1px);background-size:4px 4px;opacity:.35}
+  .left{position:absolute;left:84px;top:110px;width:560px;color:#fff}
+  .brand{display:flex;align-items:center;gap:22px}
+  .brand img{width:108px;height:108px;filter:drop-shadow(0 12px 30px rgba(0,0,0,.6))}
+  h1{font-size:96px;line-height:1;margin:0;font-weight:800;letter-spacing:-3px;
+     background:linear-gradient(180deg,#ff6b81 0%,#ff6b81 46%,#6aa2ff 54%,#6aa2ff 100%);-webkit-background-clip:text;color:transparent}
+  .tag{font-size:31px;line-height:1.3;margin:34px 0 0;color:#e9e9f2;font-weight:600;letter-spacing:-.4px}
+  .sub{font-size:21px;margin:18px 0 0;color:#a3a3b8;line-height:1.45}
+  .chips{display:flex;gap:10px;margin-top:34px;flex-wrap:wrap}
+  .chip{font-size:16px;color:#dcdcea;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);padding:8px 14px;border-radius:999px}
+  .shot{position:absolute;right:92px;top:62px;width:440px;border-radius:14px;
+        box-shadow:0 40px 90px rgba(0,0,0,.65),0 0 0 1px rgba(255,255,255,.12)}
+</style></head>
+<body>
+<div class="bg"></div><div class="grain"></div>
+<div class="left">
+  <div class="brand"><img src="icon.png"><h1>CastGlow</h1></div>
+  <p class="tag">Lighting &amp; audio control for the HyperX&nbsp;QuadCast&nbsp;S — on your Mac.</p>
+  <p class="sub">Colours, effects, mic and headphone levels, monitoring.<br>Free, native, and right in your menu bar.</p>
+  <div class="chips"><span class="chip">Apple Silicon &amp; Intel</span><span class="chip">macOS 11+</span><span class="chip">Menu bar app</span><span class="chip">No account needed</span></div>
+</div>
+<img class="shot" src="app-window.png">
+</body></html>

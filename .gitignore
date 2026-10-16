@@ -1,0 +1,6 @@
+target/
+dist/
+AppIcon.iconset/
+icon_512.png
+.DS_Store
+docs/header.html.bak

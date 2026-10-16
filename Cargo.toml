@@ -1,0 +1,19 @@
+[package]
+name = "quadcast-s-mac"
+version = "1.0.0"
+edition = "2021"
+description = "CastGlow: lighting and audio control for the HyperX QuadCast S on macOS"
+license-file = "LICENSE.md"
+
+[[bin]]
+name = "quadcast"
+path = "src/main.rs"
+
+[dependencies]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+rusb = { version = "0.9", features = ["vendored"] }
+
+[profile.release]
+opt-level = 3
+strip = true
