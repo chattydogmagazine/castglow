@@ -27,6 +27,7 @@ const kVolumeScalar: u32 = cc(b"volm");
 const kMute: u32 = cc(b"mute");
 const kPlayThru: u32 = cc(b"thru");
 const kPlayThruVolume: u32 = cc(b"mvsc");
+const kDeviceUID: u32 = cc(b"uid ");
 
 const SCOPE_GLOBAL: u32 = cc(b"glob");
 const SCOPE_INPUT: u32 = cc(b"inpt");
@@ -152,6 +153,12 @@ impl AudioDevice {
             }
         }
         Err("QuadCast audio device not found in macOS sound devices".into())
+    }
+
+    /// The device's CoreAudio UID (caller must CFRelease it).
+    pub fn uid(&self) -> Option<CFStringRef> {
+        let s = get::<usize>(self.id, kDeviceUID, SCOPE_GLOBAL, 0)? as CFStringRef;
+        (!s.is_null()).then_some(s)
     }
 
     /// Level 0-100, or None if macOS exposes no level control.

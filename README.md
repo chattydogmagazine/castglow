@@ -25,6 +25,8 @@ HyperX's own software (NGENUITY) only runs on Windows. CastGlow gives Mac owners
 - 🎨 **Lighting.** Pick any colour for the top and bottom of the mic, or choose an effect: Solid, Blink, Breathing, Rainbow Cycle, Wave or Lightning. Set the speed and brightness.
 - 💾 **Saved on the mic.** Lighting is stored inside the microphone, so it keeps glowing even when CastGlow is closed or the mic is plugged into another computer.
 - 🎙️ **Audio.** Mic level, mic mute, headphone level, headphone mute, and monitoring (hear your own voice in the headphones) with its level.
+- 🔄 **Always in step.** The window refreshes every second, so it shows changes made in macOS Sound settings or other apps too.
+- 🔇 **Knows when you tap mute.** Optional: CastGlow can spot when you mute using the touch button on top of the mic, tick Mute and show a crossed-out mic in the menu bar.
 - 🔝 **Menu bar.** A mic icon in the menu bar opens the settings, mutes the mic, or switches lights off or to rainbow in one click.
 - 🪶 **Tiny.** The download is under 1 MB, there's no account or sign-in, and it collects no data. It needs no internet connection at all.
 
@@ -56,6 +58,8 @@ Want CastGlow ready every time you turn on your Mac? Click the mic icon in the m
 | Turn the lights off | Menu bar icon → **Lights Off**, or choose **Off** as the effect |
 | Mute or unmute the mic | Menu bar icon → **Mute Mic**, or tick **Mute** in the window |
 | Hear yourself in headphones | Tick **On** next to **Hear yourself** and adjust its slider |
+| Keep the window up to date | Leave **Keep in sync** ticked under **Options** (on by default) |
+| See when you've muted using the button on the mic | Tick **Detect the mute button on top of the mic** under **Options**, and click **Allow** if macOS asks about the microphone |
 | Quit completely | Menu bar icon → **Quit CastGlow** (closing the window keeps it in the menu bar) |
 
 ## Questions & fixes
@@ -68,6 +72,12 @@ Check the QuadCast S is plugged in with its USB cable and that its lights are on
 
 **An audio slider is greyed out.**
 That control isn't offered to macOS by your mic. Everything else still works.
+
+**Does CastGlow know when I tap the top of the mic to mute?**
+Only if you switch it on. The QuadCast S doesn't tell the computer when its touch button is pressed. While muted, though, it sends almost total silence: about 10 times quieter than even a silent room with the gain turned right down. With **Detect the mute button on top of the mic** ticked, CastGlow watches for that and shows the mute within about a second. The sound is checked in memory and immediately thrown away; nothing is recorded, saved or sent anywhere. macOS shows its orange microphone dot while this option is on, because CastGlow is listening. Untick the option to turn it off.
+
+**Can CastGlow see the gain knob?**
+No. The gain knob on the bottom of the mic works inside the mic and isn't reported to the computer. The **Mic level** slider in CastGlow is the separate macOS input level.
 
 **Will this affect my Windows PC or NGENUITY?**
 No. Lighting saved by CastGlow stays on the mic, and NGENUITY can change it again at any time.

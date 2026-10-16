@@ -216,6 +216,27 @@ fn run_device(cmd: &str, rest: Vec<String>) {
                 }
             }
         }
+        "listen" => {
+            // Diagnostics: print every status report the mic sends.
+            let secs: u64 = rest.first().and_then(|v| v.parse().ok()).unwrap_or(30);
+            let light = Light::open().unwrap_or_else(|e| die(&e));
+            println!("status channel: {}", light.status_channel());
+            match light.get_feature() {
+                Ok(b) => println!("feature report: {}", b.iter().map(|x| format!("{:02X}", x)).collect::<Vec<_>>().join(" ")),
+                Err(e) => println!("feature report: unavailable ({})", e),
+            }
+            let start = Instant::now();
+            let hex = |b: &[u8]| b.iter().take(16).map(|x| format!("{:02X}", x)).collect::<Vec<_>>().join(" ");
+            let (mut li, mut lf) = (String::new(), String::new());
+            while start.elapsed() < Duration::from_secs(secs) {
+                let i = light.get_report(0x0100).map(|b| hex(&b)).unwrap_or_else(|e| format!("err {}", e));
+                let f = light.get_report(0x0300).map(|b| hex(&b)).unwrap_or_else(|e| format!("err {}", e));
+                if i != li { println!("{:7.2}s INPUT   {}", start.elapsed().as_secs_f32(), i); li = i; }
+                if f != lf { println!("{:7.2}s FEATURE {}", start.elapsed().as_secs_f32(), f); lf = f; }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            println!("done");
+        }
         "audio" if rest.first().map(String::as_str) == Some("controls") => {
             let a = audio();
             println!("{}", a.name);

@@ -10,4 +10,4 @@
 
 **How it works.** CastGlow sends the microphone the same type of standard USB messages used to set its lighting by other software. It does not change the microphone's firmware. Lighting it stores can be changed again at any time by CastGlow or by the official software.
 
-**Privacy.** CastGlow does not collect, store or send any personal data, and makes no network connections.
+**Privacy.** CastGlow does not collect, store or send any personal data, and makes no network connections. If you turn on the optional "Detect the mute button on top of the mic" setting, CastGlow listens to the microphone only to measure how quiet it is. Sound is analysed in memory and discarded immediately; it is never recorded, saved or transmitted.

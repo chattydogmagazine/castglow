@@ -3,6 +3,7 @@
 
 use super::audio::{AudioDevice, Side};
 use super::hid::Light;
+use super::listen;
 use crate::effects::{frames, Effect, EffectSpec, Speed};
 use crate::protocol::{self, Frame, Rgb};
 use std::ffi::{c_char, c_void, CString};
@@ -61,7 +62,7 @@ fn nsstr(s: &str) -> Id {
 
 // ---- controls -------------------------------------------------------------
 
-const H: f64 = 500.0;
+const H: f64 = 600.0;
 const W: f64 = 480.0;
 
 fn r(x: f64, top: f64, w: f64, h: f64) -> Rect {
@@ -75,6 +76,8 @@ const T_HP: isize = 20;
 const T_HP_MUTE: isize = 21;
 const T_MON: isize = 30;
 const T_MON_LEVEL: isize = 31;
+const T_SYNC: isize = 40;
+const T_DETECT: isize = 41;
 
 struct Ui {
     effect: usize,
@@ -92,6 +95,9 @@ struct Ui {
     win: usize,
     mute_item: usize,
     login_item: usize,
+    sync_box: usize,
+    detect_box: usize,
+    bar_button: usize,
 }
 
 static UI: OnceLock<Ui> = OnceLock::new();
@@ -189,6 +195,121 @@ fn checked(v: usize) -> bool {
     msg![isize; v as Id, "state"] != 0
 }
 
+// ---- preferences -----------------------------------------------------------
+
+const PREF_SYNC: &str = "keepInSync";
+const PREF_DETECT: &str = "detectMicMuteButton";
+
+fn defaults() -> Id {
+    msg![Id; cls("NSUserDefaults"), "standardUserDefaults"]
+}
+
+fn pref(key: &str, default: bool) -> bool {
+    let d = defaults();
+    if msg![Id; d, "objectForKey:", nsstr(key) => Id] == NIL {
+        return default;
+    }
+    msg![i8; d, "boolForKey:", nsstr(key) => Id] != 0
+}
+
+fn set_pref(key: &str, v: bool) {
+    msg![(); defaults(), "setBool:forKey:", v as i8 => i8, nsstr(key) => Id];
+}
+
+/// 3 = allowed, 2 = denied, 1 = restricted, 0 = not asked yet, -1 = unknown.
+fn mic_permission() -> isize {
+    let path = nsstr("/System/Library/Frameworks/AVFoundation.framework");
+    let bundle = msg![Id; cls("NSBundle"), "bundleWithPath:", path => Id];
+    if bundle != NIL {
+        msg![i8; bundle, "load"];
+    }
+    let c = cls("AVCaptureDevice");
+    if c == NIL {
+        return -1;
+    }
+    msg![isize; c, "authorizationStatusForMediaType:", nsstr("soun") => Id]
+}
+
+fn start_detection() -> Result<String, String> {
+    if mic_permission() == 2 || mic_permission() == 1 {
+        return Err("CastGlow isn't allowed to use the microphone. Turn it on in System Settings > Privacy & Security > Microphone, then tick this again.".into());
+    }
+    let a = AudioDevice::find()?;
+    let uid = a.uid().ok_or("could not identify the QuadCast audio device")?;
+    let r = listen::start(uid);
+    unsafe { super::cf::CFRelease(uid) };
+    r.map(|_| "Watching for the mic's own mute button. Tap the top of the mic to try it.".to_string())
+}
+
+static LAST_MUTED: std::sync::atomic::AtomicI8 = std::sync::atomic::AtomicI8::new(-1);
+static LAST_HW: std::sync::atomic::AtomicI8 = std::sync::atomic::AtomicI8::new(-1);
+
+fn set_bar_icon(muted: bool) {
+    let Some(ui) = UI.get() else { return };
+    if ui.bar_button == 0 {
+        return;
+    }
+    let name = if muted { "mic.slash.fill" } else { "mic.fill" };
+    let img = msg![Id; cls("NSImage"), "imageWithSystemSymbolName:accessibilityDescription:", nsstr(name) => Id, nsstr("CastGlow") => Id];
+    if img != NIL {
+        msg![(); img, "setTemplate:", 1i8 => i8];
+        msg![(); ui.bar_button as Id, "setImage:", img => Id];
+    }
+}
+
+/// Runs every second: brings the window and menu bar icon up to date.
+extern "C" fn on_tick(_this: Id, _cmd: Sel, _timer: Id) {
+    let Some(ui) = UI.get() else { return };
+    let sync = checked(ui.sync_box);
+    let hw = if checked(ui.detect_box) { listen::muted_on_mic() } else { None };
+    if std::env::var_os("CASTGLOW_DEBUG").is_some() || std::path::Path::new("/tmp/castglow-debug").exists() {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/castglow-listen.log") {
+            let _ = writeln!(f, "{:?} perm={} {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0), mic_permission(), listen::debug_line());
+        }
+    }
+    let audio = if sync || hw.is_some() { AudioDevice::find().ok() } else { None };
+    let soft = audio.as_ref().and_then(|a| a.muted(Side::Mic)).unwrap_or(false);
+
+    if sync {
+        if let Some(a) = &audio {
+            // Don't fight the user while they drag a slider.
+            let dragging = msg![usize; cls("NSEvent"), "pressedMouseButtons"] != 0;
+            if !dragging {
+                for (v, s) in [(a.volume(Side::Mic), ui.mic), (a.volume(Side::Headphones), ui.hp), (a.monitoring_level(), ui.mon_level)] {
+                    if let Some(x) = v {
+                        if value(s) != x {
+                            msg![(); s as Id, "setDoubleValue:", x as f64 => f64];
+                        }
+                    }
+                }
+            }
+            if let Some(m) = a.muted(Side::Headphones) {
+                msg![(); ui.hp_mute as Id, "setState:", m as isize => isize];
+            }
+            if let Some(m) = a.monitoring() {
+                msg![(); ui.mon as Id, "setState:", m as isize => isize];
+            }
+        }
+    }
+
+    let muted = soft || hw == Some(true);
+    if sync || hw.is_some() {
+        msg![(); ui.mic_mute as Id, "setState:", muted as isize => isize];
+    }
+    if LAST_MUTED.swap(muted as i8, std::sync::atomic::Ordering::Relaxed) != muted as i8 {
+        set_bar_icon(muted);
+    }
+    if let Some(h) = hw {
+        let prev = LAST_HW.swap(h as i8, std::sync::atomic::Ordering::Relaxed);
+        if prev != -1 && prev != h as i8 {
+            set_status(if h { "Muted with the button on the mic. Tap the top of the mic to unmute." } else { "Mic unmuted." });
+        }
+    } else {
+        LAST_HW.store(-1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 // ---- actions ----------------------------------------------------------------
 
 fn apply_lighting(ui: &Ui) -> Result<String, String> {
@@ -210,6 +331,25 @@ fn handle(tag: isize) {
     let Some(ui) = UI.get() else { return };
     let res: Result<String, String> = match tag {
         T_APPLY => apply_lighting(ui),
+        T_SYNC => {
+            set_pref(PREF_SYNC, checked(ui.sync_box));
+            Ok((if checked(ui.sync_box) { "Keeping in sync with the mic and macOS." } else { "Sync off: the window shows only changes made here." }).to_string())
+        }
+        T_DETECT => {
+            let on = checked(ui.detect_box);
+            set_pref(PREF_DETECT, on);
+            if on {
+                let r = start_detection();
+                if r.is_err() {
+                    msg![(); ui.detect_box as Id, "setState:", 0isize => isize];
+                    set_pref(PREF_DETECT, false);
+                }
+                r
+            } else {
+                listen::stop();
+                Ok("Stopped watching for the mic's mute button.".to_string())
+            }
+        }
         T_MIC | T_HP | T_MIC_MUTE | T_HP_MUTE | T_MON | T_MON_LEVEL => AudioDevice::find().and_then(|a| match tag {
             T_MIC => a.set_volume(Side::Mic, value(ui.mic)).map(|_| format!("Mic level {}%", value(ui.mic))),
             T_HP => a.set_volume(Side::Headphones, value(ui.hp)).map(|_| format!("Headphone level {}%", value(ui.hp))),
@@ -356,8 +496,8 @@ fn separator(menu: Id) {
     msg![(); menu, "addItem:", s => Id];
 }
 
-/// Builds the mic icon in the menu bar. Returns (mute item, login item).
-fn build_status_item(ctrl: Id) -> (Id, Id) {
+/// Builds the mic icon in the menu bar. Returns (mute item, login item, button).
+fn build_status_item(ctrl: Id) -> (Id, Id, Id) {
     let bar = msg![Id; cls("NSStatusBar"), "systemStatusBar"];
     let item = msg![Id; bar, "statusItemWithLength:", -1.0 => f64];
     msg![Id; item, "retain"];
@@ -388,7 +528,7 @@ fn build_status_item(ctrl: Id) -> (Id, Id) {
         nsstr("Quit CastGlow") => Id, sel("terminate:") => Sel, nsstr("q") => Id];
     msg![(); menu, "addItem:", quit => Id];
     msg![(); item, "setMenu:", menu => Id];
-    (mute, login)
+    (mute, login, button)
 }
 
 // ---- window -----------------------------------------------------------------
@@ -411,6 +551,7 @@ pub fn run() {
             c"c@:@".as_ptr(),
         );
         class_addMethod(ctrl_class, sel("onMenu:"), on_menu as *const c_void, c"v@:@".as_ptr());
+        class_addMethod(ctrl_class, sel("onTick:"), on_tick as *const c_void, c"v@:@".as_ptr());
         class_addMethod(ctrl_class, sel("menuWillOpen:"), menu_will_open as *const c_void, c"v@:@".as_ptr());
         class_addMethod(
             ctrl_class,
@@ -470,7 +611,15 @@ pub fn run() {
     let mon_level = slider(v, r(140.0, 378.0, 230.0, 24.0), 50.0, ctrl, T_MON_LEVEL);
     let mon = checkbox(v, "On", r(385.0, 378.0, 80.0, 24.0), ctrl, T_MON);
 
-    let status = label(v, "", r(20.0, 425.0, 440.0, 60.0), false);
+    // Options
+    label(v, "Options", r(20.0, 425.0, 300.0, 20.0), true);
+    let sync_box = checkbox(v, "Keep in sync with the mic and macOS (updates every second)", r(20.0, 455.0, 450.0, 22.0), ctrl, T_SYNC);
+    let detect_box = checkbox(v, "Detect the mute button on top of the mic", r(20.0, 483.0, 450.0, 22.0), ctrl, T_DETECT);
+    label(v, "Listens for the silence the mic sends when muted. macOS shows its orange microphone dot while this is on. Nothing is recorded.", r(40.0, 506.0, 420.0, 32.0), false);
+    msg![(); sync_box, "setState:", pref(PREF_SYNC, true) as isize => isize];
+    msg![(); detect_box, "setState:", pref(PREF_DETECT, false) as isize => isize];
+
+    let status = label(v, "", r(20.0, 548.0, 440.0, 44.0), false);
 
     let ui = Ui {
         effect: effect as usize,
@@ -488,9 +637,12 @@ pub fn run() {
         win: win as usize,
         mute_item: 0,
         login_item: 0,
+        sync_box: sync_box as usize,
+        detect_box: detect_box as usize,
+        bar_button: 0,
     };
-    let (mute_item, login_item) = build_status_item(ctrl);
-    let ui = Ui { mute_item: mute_item as usize, login_item: login_item as usize, ..ui };
+    let (mute_item, login_item, bar_button) = build_status_item(ctrl);
+    let ui = Ui { mute_item: mute_item as usize, login_item: login_item as usize, bar_button: bar_button as usize, ..ui };
 
     // Load current audio settings; grey out what macOS doesn't offer.
     let mut notes: Vec<String> = vec![];
@@ -527,6 +679,14 @@ pub fn run() {
     }
     let _ = UI.set(ui);
     set_status(&notes.join("  "));
+    if pref(PREF_DETECT, false) {
+        if let Err(e) = start_detection() {
+            set_status(&format!("Problem: {}", e));
+        }
+    }
+    let timer = msg![Id; cls("NSTimer"), "scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:",
+        1.0 => f64, ctrl => Id, sel("onTick:") => Sel, NIL => Id, 1i8 => i8];
+    msg![Id; timer, "retain"];
 
     msg![(); win, "center"];
     msg![(); win, "makeKeyAndOrderFront:", NIL => Id];
