@@ -61,7 +61,7 @@ Want CastGlow ready every time you turn on your Mac? Click the mic icon in the m
 | Hear yourself in headphones | Tick **On** next to **Hear yourself** and adjust its slider |
 | Keep the window up to date | Leave **Keep in sync** ticked under **Options** (on by default) |
 | See when you've muted using the button on the mic | Tick **Detect the mute button on top of the mic** under **Options**, and click **Allow** if macOS asks about the microphone |
-| Colour the menu bar icon | Leave **Menu bar icon in mic colours** ticked under **Options**: the icon shows your **top** colour when the mic is live and your **bottom** colour when it's muted. Untick it for the normal menu bar colour |
+| Colour the menu bar icon | Leave **Menu bar icon in mic colours** ticked under **Options**: the icon shows your **top** colour when the mic is live and your **bottom** colour when it's muted. Very dark colours are brightened so the icon stays visible on a dark menu bar. Untick it for the normal menu bar colour |
 | Quit completely | Menu bar icon → **Quit CastGlow** (closing the window keeps it in the menu bar) |
 
 ## Questions & fixes

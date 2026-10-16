@@ -35,7 +35,10 @@ extern "C" {
 #[link(name = "AppKit", kind = "framework")]
 extern "C" {
     fn NSBeep();
+    fn NSRectFillUsingOperation(rect: Rect, op: usize);
 }
+
+
 
 fn cls(n: &str) -> Id {
     let c = CString::new(n).unwrap();
@@ -296,6 +299,31 @@ fn start_detection_in_background() {
 static LAST_MUTED: std::sync::atomic::AtomicI8 = std::sync::atomic::AtomicI8::new(-1);
 static LAST_HW: std::sync::atomic::AtomicI8 = std::sync::atomic::AtomicI8::new(-1);
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Size {
+    w: f64,
+    h: f64,
+}
+
+/// Returns a copy of a template symbol image painted in `colour`.
+/// The macOS menu bar ignores tint colours on status items and draws
+/// template images in black or white, so coloured icons have to be
+/// real, non-template images.
+fn painted(img: Id, colour: Id) -> Id {
+    let size = msg![Size; img, "size"];
+    let out = msg![Id; msg![Id; cls("NSImage"), "alloc"], "initWithSize:", size => Size];
+    let rect = Rect { x: 0.0, y: 0.0, w: size.w, h: size.h };
+    let zero = Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+    msg![(); out, "lockFocus"];
+    msg![(); img, "drawInRect:fromRect:operation:fraction:", rect => Rect, zero => Rect, 2usize => usize, 1.0 => f64];
+    msg![(); colour, "set"];
+    unsafe { NSRectFillUsingOperation(rect, 5) }; // source-atop: colour only where the symbol is
+    msg![(); out, "unlockFocus"];
+    msg![(); out, "setTemplate:", 0i8 => i8];
+    out
+}
+
 /// Menu bar icon. `state`: Some(false) = live, Some(true) = muted,
 /// None = unknown (mic not found). With "Colour the menu bar icon" on,
 /// live uses the mic's top colour and muted its bottom colour; otherwise,
@@ -315,22 +343,43 @@ fn set_bar_icon(state: Option<bool>) {
     let tint = match state {
         Some(m) if checked(ui.tint_box) => {
             let c = well_colour(if m { ui.bottom } else { ui.top } as Id);
-            // A colour too dark to see in the menu bar falls back to the system colour.
-            if c.0 as u32 + c.1 as u32 + c.2 as u32 > 90 { nscolor(c) } else { NIL }
+            // Dark colours vanish on a dark menu bar: keep the shade but lift
+            // its brightest channel to at least 200. Near-black has no shade
+            // to keep, so it uses the system colour.
+            let max = c.0.max(c.1).max(c.2) as u32;
+            if max < 24 {
+                NIL
+            } else if max < 200 {
+                let k = |v: u8| ((v as u32 * 200 + max / 2) / max).min(255) as u8;
+                nscolor(Rgb(k(c.0), k(c.1), k(c.2)))
+            } else {
+                nscolor(c)
+            }
         }
         _ => NIL,
     };
-    msg![(); ui.bar_button as Id, "setContentTintColor:", tint => Id];
+    if img != NIL {
+        if tint != NIL {
+            msg![(); ui.bar_button as Id, "setImage:", painted(img, tint) => Id];
+        } else {
+            msg![(); ui.bar_button as Id, "setImage:", img => Id];
+        }
+    }
+    msg![(); ui.bar_button as Id, "setContentTintColor:", NIL => Id];
     if std::path::Path::new("/tmp/castglow-debug").exists() {
         use std::io::Write;
-        let applied = msg![Id; ui.bar_button as Id, "contentTintColor"];
+        let applied = tint;
         let desc = if applied == NIL { "system default".to_string() } else {
             let d = msg![Id; applied, "description"];
             let p = msg![*const c_char; d, "UTF8String"];
             unsafe { std::ffi::CStr::from_ptr(p) }.to_string_lossy().into_owned()
         };
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/castglow-icon.log") {
-            let _ = writeln!(f, "state={:?} icon={} tint={}", state, name, desc);
+            let w = msg![Id; ui.bar_button as Id, "window"];
+            let fr = if w != NIL { msg![Rect; w, "frame"] } else { Rect { x: -1.0, y: -1.0, w: 0.0, h: 0.0 } };
+            let shown = msg![Id; ui.bar_button as Id, "image"];
+            let tmpl = if shown != NIL { msg![i8; shown, "isTemplate"] } else { -1 };
+            let _ = writeln!(f, "state={:?} icon={} tint={} frame=({},{} {}x{}) template={}", state, name, desc, fr.x, fr.y, fr.w, fr.h, tmpl);
         }
     }
     let tip = match state {
